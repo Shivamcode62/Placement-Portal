@@ -1,0 +1,807 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Code,
+  FileText,
+  Brain,
+  Briefcase,
+  Calendar,
+  Trophy,
+  Search,
+  Moon,
+  Sun,
+  BookMarked,
+  Timer,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  Upload,
+  PlayCircle,
+  BarChart2,
+  ChevronDown,
+  ShieldCheck,
+} from "lucide-react";
+
+// Minimal UI primitives (so we don't depend on external UI kits)
+const Button = ({ className = "", children, ...props }) => (
+  <button
+    className={`px-4 py-2 rounded-2xl shadow hover:shadow-lg transition focus:outline-none focus:ring ring-indigo-500/40 disabled:opacity-50 ${className}`}
+    {...props}
+  >
+    {children}
+  </button>
+);
+
+const Card = ({ className = "", children }) => (
+  <div className={`rounded-2xl border border-white/10 bg-zinc-900/60 backdrop-blur p-5 shadow ${className}`}>{children}</div>
+);
+
+const Badge = ({ children, className = "" }) => (
+  <span className={`inline-flex items-center gap-1 rounded-full border border-white/10 bg-zinc-800 px-3 py-1 text-xs ${className}`}>{children}</span>
+);
+
+const SectionTitle = ({ icon: Icon, title, subtitle }) => (
+  <div className="flex items-end justify-between gap-4">
+    <div>
+      <div className="flex items-center gap-2 text-zinc-300">
+        {Icon && <Icon className="h-5 w-5" />}
+        <span className="uppercase tracking-widest text-xs text-zinc-400">Module</span>
+      </div>
+      <h2 className="text-2xl md:text-3xl font-semibold mt-1 text-white">{title}</h2>
+      {subtitle && <p className="text-zinc-400 mt-1 max-w-2xl">{subtitle}</p>}
+    </div>
+  </div>
+);
+
+// Helpers
+const persist = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+const revive = (key, fallback) => {
+  try {
+    const v = JSON.parse(localStorage.getItem(key));
+    return v ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const defaultAptitudeQuestions = [
+  {
+    id: "apt1",
+    q: "If the ratio of boys to girls is 3:2 in a class of 40, how many girls are there?",
+    options: ["12", "16", "18", "24"],
+    answer: 1,
+    explanation: "3x + 2x = 40 ⇒ 5x = 40 ⇒ x = 8 ⇒ girls = 2x = 16.",
+  },
+  {
+    id: "apt2",
+    q: "Simple interest on ₹5000 at 10% per annum for 2 years?",
+    options: ["₹500", "₹1000", "₹1500", "₹2000"],
+    answer: 1,
+    explanation: "SI = PRT/100 = 5000×10×2/100 = ₹1000.",
+  },
+  {
+    id: "apt3",
+    q: "A train 180m long crosses a pole in 9s. Speed?",
+    options: ["20 m/s", "25 m/s", "18 m/s", "15 m/s"],
+    answer: 1,
+    explanation: "Speed = distance/time = 180/9 = 20 m/s.",
+  },
+];
+
+const codingProblems = [
+  {
+    id: "sum-array",
+    title: "Sum of Array",
+    difficulty: "Easy",
+    prompt:
+      "Write a function sumArray(arr) that returns the sum of all numbers in an array. Assume all elements are numbers.",
+    functionName: "sumArray",
+    template: `function sumArray(arr){\n  // your code here\n}\nmodule.exports = sumArray;`,
+    tests: [
+      { input: [[1, 2, 3]], output: 6 },
+      { input: [[10, -5, 5, 0]], output: 10 },
+    ],
+  },
+  {
+    id: "is-anagram",
+    title: "Valid Anagram",
+    difficulty: "Medium",
+    prompt:
+      "Write a function isAnagram(a, b) that returns true if strings a and b are anagrams (case-insensitive), else false.",
+    functionName: "isAnagram",
+    template: `function isAnagram(a,b){\n  // your code here\n}\nmodule.exports = isAnagram;`,
+    tests: [
+      { input: ["Listen", "Silent"], output: true },
+      { input: ["rat", "car"], output: false },
+    ],
+  },
+  {
+    id: "two-sum",
+    title: "Two Sum (Index)",
+    difficulty: "Medium",
+    prompt:
+      "Given nums and target, return indices [i,j] such that nums[i]+nums[j]=target (i<j). Return null if none.",
+    functionName: "twoSumIndex",
+    template: `function twoSumIndex(nums, target){\n  // your code here\n}\nmodule.exports = twoSumIndex;`,
+    tests: [
+      { input: [[2,7,11,15], 9], output: [0,1] },
+      { input: [[3,2,4], 6], output: [1,2] },
+    ],
+  },
+];
+
+const hrQuestions = [
+  {
+    id: 1,
+    q: "Tell me about yourself.",
+    tips: [
+      "Use a 60–90 second structured story (Present → Past → Future).",
+      "Tie your skills to the role and company mission.",
+    ],
+  },
+  {
+    id: 2,
+    q: "Describe a challenge you faced and how you resolved it.",
+    tips: ["Use STAR: Situation, Task, Action, Result.", "Quantify the outcome if possible."],
+  },
+  {
+    id: 3,
+    q: "Why should we hire you?",
+    tips: [
+      "Match 3–4 role requirements to your strengths",
+      "Finish with a confident, value-focused close",
+    ],
+  },
+];
+
+const companySheets = [
+  { name: "TCS", tags: ["Aptitude", "Email Writing", "Coding (Easy)"] },
+  { name: "Infosys", tags: ["Aptitude", "Puzzles", "DBMS"] },
+  { name: "Wipro", tags: ["Aptitude", "Verbal", "Coding"] },
+  { name: "Amazon", tags: ["DSA", "System Design", "Behavioral"] },
+];
+
+// Simple resume analyzer heuristics
+function analyzeResume(text) {
+  const raw = text || "";
+  const txt = raw.replace(/\s+/g, " ").trim();
+  const lengthScore = Math.min(25, Math.floor(txt.length / 400)); // 0..25
+  const bullets = (txt.match(/[•\-*]\s/g) || []).length;
+  const bulletScore = Math.min(15, bullets * 3);
+  const numbers = (txt.match(/\b(\d+%?|\d+\.\d+)\b/g) || []).length;
+  const quantScore = Math.min(20, numbers * 2);
+  const keywords = [
+    "Java", "Python", "C++", "React", "Node", "SQL", "MongoDB", "AWS", "GCP", "Docker",
+    "Kubernetes", "REST", "Microservices", "Data Structures", "Algorithms", "OOP", "Git",
+    "Leadership", "Team", "Project", "Internship", "Hackathon",
+  ];
+  const found = keywords.filter((k) => new RegExp(`\\b${k}\\b`, "i").test(txt));
+  const keywordScore = Math.min(25, found.length * 2);
+  const educationScore = /B\.?Tech|B\.?E|MCA|BSc|MSc|Diploma|Bachelor|Master/i.test(txt) ? 5 : 0;
+  const sections = [/experience/i, /projects?/i, /skills?/i, /education/i, /achievements?/i];
+  const sectionScore = Math.min(10, sections.filter((r) => r.test(txt)).length * 2);
+  const score = lengthScore + bulletScore + quantScore + keywordScore + educationScore + sectionScore; // /100
+
+  const suggestions = [];
+  if (lengthScore < 10) suggestions.push("Add more relevant detail (impact, scope, tools).");
+  if (bulletScore < 9) suggestions.push("Use bullet points for clarity.");
+  if (quantScore < 12) suggestions.push("Quantify achievements with numbers (%, $, time saved).");
+  if (keywordScore < 14) suggestions.push("Add role-specific keywords naturally (ATS-friendly).");
+  if (!/\bemail\b|@/i.test(txt)) suggestions.push("Include a professional email/contact header.");
+  if (!/github\.com|linkedin\.com/i.test(txt)) suggestions.push("Add GitHub/LinkedIn links.");
+
+  return { score: Math.min(100, score), found, suggestions };
+}
+
+function PrettyScore({ value }) {
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-between text-sm text-zinc-400">
+        <span>ATS Heuristic Score</span>
+        <span>{value}/100</span>
+      </div>
+      <div className="w-full h-3 rounded-full bg-zinc-800 mt-2 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-500"
+          style={{ width: `${value}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function useDark(defaultDark = true) {
+  const [dark, setDark] = useState(revive("sppp:dark", defaultDark));
+  useEffect(() => {
+    persist("sppp:dark", dark);
+    if (dark) document.documentElement.classList.add("dark");
+    else document.documentElement.classList.remove("dark");
+  }, [dark]);
+  return [dark, setDark];
+}
+
+function useStreak() {
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const [streak, setStreak] = useState(revive("sppp:streak", { last: todayKey, count: 0 }));
+  useEffect(() => {
+    const last = streak.last;
+    if (last !== todayKey) {
+      const diff = (new Date(todayKey) - new Date(last)) / (1000 * 3600 * 24);
+      const nextCount = diff === 1 ? streak.count + 1 : 1;
+      const next = { last: todayKey, count: nextCount };
+      setStreak(next);
+      persist("sppp:streak", next);
+    }
+    // eslint-disable-next-line
+  }, []);
+  return streak.count;
+}
+
+function AptitudeModule() {
+  const [questions] = useState(defaultAptitudeQuestions);
+  const [index, setIndex] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [score, setScore] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(60);
+
+  useEffect(() => {
+    const t = setInterval(() => setTimeLeft((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [index]);
+
+  const q = questions[index];
+  const submit = () => {
+    if (selected === null) return;
+    if (selected === q.answer) setScore((s) => s + 1);
+  };
+  const next = () => {
+    setSelected(null);
+    setTimeLeft(60);
+    setIndex((i) => Math.min(questions.length - 1, i + 1));
+  };
+
+  return (
+    <Card>
+      <SectionTitle
+        icon={BarChart2}
+        title="Aptitude Practice Test"
+        subtitle="Timed MCQs across Ratio & Proportion, SI/CI, Speed & Distance and more."
+      />
+      <div className="mt-4 grid md:grid-cols-[1fr_280px] gap-5">
+        <div>
+          <div className="flex items-center justify-between text-sm text-zinc-400">
+            <Badge><Timer className="h-4 w-4" /> {timeLeft}s</Badge>
+            <Badge><Trophy className="h-4 w-4" /> Score: {score}/{questions.length}</Badge>
+          </div>
+          <div className="mt-4 text-lg text-white">{q.q}</div>
+          <div className="mt-4 grid gap-3">
+            {q.options.map((opt, i) => (
+              <label key={i} className={`flex items-center gap-3 rounded-xl border p-3 cursor-pointer transition ${selected===i?"border-indigo-500 bg-indigo-500/10":"border-white/10 hover:bg-white/5"}`}>
+                <input type="radio" name="apt" checked={selected===i} onChange={() => setSelected(i)} />
+                <span className="text-zinc-200">{opt}</span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-4 flex gap-3">
+            <Button className="bg-indigo-600 text-white" onClick={submit}><CheckCircle2 className="h-4 w-4 mr-2 inline"/>Submit</Button>
+            <Button className="bg-zinc-800 text-zinc-200" onClick={next}><ChevronDown className="h-4 w-4 mr-2 inline rotate-[-90deg]"/>Next</Button>
+          </div>
+          <p className="mt-4 text-sm text-zinc-400">
+            {selected !== null && (
+              <>
+                {selected === q.answer ? (
+                  <span className="text-emerald-400">Correct!</span>
+                ) : (
+                  <span className="text-rose-400">Incorrect.</span>
+                )} {q.explanation}
+              </>
+            )}
+          </p>
+        </div>
+        <div className="space-y-3">
+          <Card>
+            <div className="text-sm text-zinc-400">Chapters</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {["Percentages","Profit & Loss","Time & Work","Probability"].map((c) => (
+                <Badge key={c}>{c}</Badge>
+              ))}
+            </div>
+          </Card>
+          <Card>
+            <div className="text-sm text-zinc-400">Tips</div>
+            <ul className="mt-2 list-disc pl-5 text-zinc-300 text-sm space-y-1">
+              <li>Practice with a timer to build speed.</li>
+              <li>Use elimination to save time.</li>
+              <li>Revisit mistakes and maintain an error log.</li>
+            </ul>
+          </Card>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function CodingModule() {
+  const [problemId, setProblemId] = useState(codingProblems[0].id);
+  const problem = useMemo(() => codingProblems.find((p) => p.id === problemId), [problemId]);
+  const [code, setCode] = useState(problem.template);
+  const [results, setResults] = useState([]);
+
+  useEffect(() => setCode(problem.template), [problem]);
+
+  const run = () => {
+    const outputs = [];
+    try {
+      // eslint-disable-next-line no-new-func
+      const module = { exports: {} };
+      const wrapper = new Function("module", "exports", code + "\nreturn module.exports;");
+      const fn = wrapper(module, module.exports);
+      for (const t of problem.tests) {
+        const got = Array.isArray(t.input) ? fn(...t.input) : fn(t.input);
+        const pass = JSON.stringify(got) === JSON.stringify(t.output);
+        outputs.push({ input: t.input, expected: t.output, got, pass });
+      }
+    } catch (e) {
+      setResults([{ error: e.message }]);
+      return;
+    }
+    setResults(outputs);
+  };
+
+  return (
+    <Card>
+      <SectionTitle icon={Code} title="Coding Challenges" subtitle="Practice DSA in-browser with auto-tests (JavaScript)." />
+      <div className="mt-4 grid md:grid-cols-[380px_1fr] gap-5">
+        <div className="space-y-3">
+          <label className="text-sm text-zinc-400">Select Problem</label>
+          <select
+            className="w-full rounded-xl bg-zinc-900 border border-white/10 p-3 text-zinc-200"
+            value={problemId}
+            onChange={(e) => setProblemId(e.target.value)}
+          >
+            {codingProblems.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.title} • {p.difficulty}
+              </option>
+            ))}
+          </select>
+          <Card>
+            <div className="text-sm text-zinc-400">Prompt</div>
+            <p className="mt-1 text-zinc-200">{problem.prompt}</p>
+          </Card>
+          <div className="text-sm text-zinc-400">Testcases</div>
+          <div className="space-y-2">
+            {problem.tests.map((t, i) => (
+              <div key={i} className="text-xs text-zinc-300 bg-black/40 rounded-lg p-2 border border-white/10">
+                input: <code>{JSON.stringify(t.input)}</code> → output: <code>{JSON.stringify(t.output)}</code>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-zinc-400">Editor</div>
+            <Button className="bg-emerald-600 text-white" onClick={run}><PlayCircle className="h-4 w-4 mr-2 inline"/>Run Tests</Button>
+          </div>
+          <textarea
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="w-full h-72 md:h-96 rounded-xl bg-black/70 text-zinc-100 font-mono text-sm p-4 border border-white/10"
+            spellCheck={false}
+          />
+          <div className="space-y-2">
+            <div className="text-sm text-zinc-400">Results</div>
+            <AnimatePresence>
+              {results.map((r, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  className={`rounded-xl p-3 border ${r.error ? "border-rose-600/50 bg-rose-900/20" : r.pass ? "border-emerald-600/40 bg-emerald-900/10" : "border-amber-600/40 bg-amber-900/10"}`}
+                >
+                  {r.error ? (
+                    <div className="text-rose-300 text-sm"><AlertCircle className="h-4 w-4 inline mr-2"/>{r.error}</div>
+                  ) : (
+                    <div className="text-zinc-200 text-sm">
+                      input <code className="text-zinc-300">{JSON.stringify(r.input)}</code> → expected <code className="text-zinc-300">{JSON.stringify(r.expected)}</code> • got <code className="text-zinc-300">{JSON.stringify(r.got)}</code>
+                      <div className={`text-xs mt-1 ${r.pass?"text-emerald-400":"text-amber-300"}`}>{r.pass?"Passed":"Mismatch"}</div>
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function HRModule() {
+  const [current, setCurrent] = useState(0);
+  const [timer, setTimer] = useState(120);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setTimer((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [running]);
+
+  const q = hrQuestions[current];
+
+  return (
+    <Card>
+      <SectionTitle icon={Briefcase} title="HR Interview Practice" subtitle="Common HR questions with STAR tips and a speaking timer." />
+      <div className="mt-4 grid md:grid-cols-[1fr_320px] gap-5">
+        <div>
+          <div className="flex items-center justify-between text-sm text-zinc-400">
+            <Badge><Timer className="h-4 w-4"/> {timer}s</Badge>
+            <div className="flex gap-2">
+              <Button className="bg-indigo-600 text-white" onClick={() => setRunning(true)}>Start</Button>
+              <Button className="bg-zinc-800 text-zinc-200" onClick={() => setRunning(false)}>Pause</Button>
+              <Button className="bg-zinc-800 text-zinc-200" onClick={() => setTimer(120)}>Reset</Button>
+            </div>
+          </div>
+          <div className="mt-4 text-xl text-white">{q.q}</div>
+          <ul className="mt-4 list-disc pl-5 text-zinc-300 space-y-1">
+            {q.tips.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
+          <div className="mt-4 text-sm text-zinc-400">Tip: Record your answer on your phone and review for clarity, pace, and fillers.</div>
+        </div>
+        <div className="space-y-3">
+          <Card>
+            <div className="text-sm text-zinc-400">Question Bank</div>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {hrQuestions.map((_, i) => (
+                <Button key={i} className={`px-3 py-1 text-sm ${i===current?"bg-indigo-600 text-white":"bg-zinc-800 text-zinc-200"}`} onClick={() => setCurrent(i)}>
+                  Q{i+1}
+                </Button>
+              ))}
+            </div>
+          </Card>
+          <Card>
+            <div className="text-sm text-zinc-400">Answer Outline (STAR)</div>
+            <ul className="mt-2 text-sm text-zinc-300 space-y-1">
+              <li><b>S</b>ituation: Context & constraints</li>
+              <li><b>T</b>ask: Your responsibility</li>
+              <li><b>A</b>ction: Steps you took</li>
+              <li><b>R</b>esult: Outcome with metrics</li>
+            </ul>
+          </Card>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ResumeModule() {
+  const [text, setText] = useState("");
+  const [result, setResult] = useState(null);
+  const analyze = () => setResult(analyzeResume(text));
+
+  return (
+    <Card>
+      <SectionTitle icon={FileText} title="AI-Based Resume Analyzer" subtitle="Paste your resume text for an instant ATS-style heuristic score and suggestions." />
+      <div className="mt-4 grid md:grid-cols-[1fr_380px] gap-5">
+        <div className="space-y-3">
+          <textarea
+            className="w-full h-72 rounded-xl bg-black/70 text-zinc-100 font-mono text-sm p-4 border border-white/10"
+            placeholder="Paste your resume text here..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="flex gap-3">
+            <Button className="bg-emerald-600 text-white" onClick={analyze}><Brain className="h-4 w-4 inline mr-2"/>Analyze</Button>
+            <Button className="bg-zinc-800 text-zinc-100" onClick={() => setText("")}>Clear</Button>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {result ? (
+            <>
+              <Card>
+                <PrettyScore value={result.score} />
+                <div className="mt-3 text-sm text-zinc-400">Detected Keywords:</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {result.found.length ? result.found.map((k) => <Badge key={k}>{k}</Badge>) : <span className="text-zinc-500 text-sm">None</span>}
+                </div>
+              </Card>
+              <Card>
+                <div className="text-sm text-zinc-400">Suggestions</div>
+                <ul className="mt-2 list-disc pl-5 text-zinc-300 text-sm space-y-1">
+                  {result.suggestions.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+                <div className="text-xs text-zinc-500 mt-3">Note: Heuristic only. For best results, tailor resume to each JD.</div>
+              </Card>
+            </>
+          ) : (
+            <div className="text-sm text-zinc-400">Paste your resume to see insights.</div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ExtraFeatures() {
+  const [query, setQuery] = useState("");
+  const [notes, setNotes] = useState(revive("sppp:notes", []));
+  const [bookmarks, setBookmarks] = useState(revive("sppp:bookmarks", []));
+  const [selectedCompany, setSelectedCompany] = useState(companySheets[0].name);
+  const streak = useStreak();
+
+  useEffect(() => persist("sppp:notes", notes), [notes]);
+  useEffect(() => persist("sppp:bookmarks", bookmarks), [bookmarks]);
+
+  const addNote = () => {
+    const text = prompt("Add a quick note");
+    if (text) setNotes([{ id: Date.now(), text }, ...notes]);
+  };
+
+  const addBookmark = () => {
+    const url = prompt("Add a resource URL (https://...)");
+    if (url) setBookmarks([{ id: Date.now(), url }, ...bookmarks]);
+  };
+
+  return (
+    <div className="grid lg:grid-cols-3 gap-5">
+      <Card className="lg:col-span-2">
+        <SectionTitle icon={Calendar} title="Roadmap & Company Sheets" subtitle="What to study each week and company-specific focus areas." />
+        <div className="mt-4 grid md:grid-cols-2 gap-4">
+          <Card>
+            <div className="text-sm text-zinc-400">4-Week Roadmap</div>
+            <ul className="mt-2 text-sm text-zinc-300 space-y-1 list-disc pl-5">
+              <li><b>W1:</b> Aptitude (Ratios, P&L), DSA Arrays & Strings</li>
+              <li><b>W2:</b> DSA Hash/Two-Pointers, OOP & DBMS Basics</li>
+              <li><b>W3:</b> DSA Trees/Graphs, OS & CN essentials</li>
+              <li><b>W4:</b> Mock Interviews, Resume finalization, Company sheets</li>
+            </ul>
+          </Card>
+          <Card>
+            <div className="text-sm text-zinc-400">Company Focus</div>
+            <select
+              className="w-full rounded-xl bg-zinc-900 border border-white/10 p-3 text-zinc-200 mt-2"
+              value={selectedCompany}
+              onChange={(e) => setSelectedCompany(e.target.value)}
+            >
+              {companySheets.map((c) => (
+                <option key={c.name}>{c.name}</option>
+              ))}
+            </select>
+            <div className="flex flex-wrap gap-2 mt-3">
+              {companySheets.find((c) => c.name === selectedCompany)?.tags.map((t) => (
+                <Badge key={t}>{t}</Badge>
+              ))}
+            </div>
+          </Card>
+        </div>
+        <div className="mt-4 grid md:grid-cols-3 gap-4">
+          <Card>
+            <div className="text-sm text-zinc-400">Daily Streak</div>
+            <div className="mt-2 text-4xl font-semibold text-white">{streak} 🔥</div>
+            <div className="text-xs text-zinc-400 mt-1">Open the portal at least once a day to keep the streak.</div>
+          </Card>
+          <Card>
+            <div className="text-sm text-zinc-400">Bookmarks</div>
+            <div className="flex gap-2 mt-2">
+              <Button className="bg-zinc-800 text-zinc-200" onClick={addBookmark}><BookMarked className="h-4 w-4 mr-1"/>Add</Button>
+            </div>
+            <ul className="mt-2 space-y-1 text-sm">
+              {bookmarks.map((b) => (
+                <li key={b.id} className="flex items-center justify-between gap-2">
+                  <a className="text-indigo-400 hover:underline truncate" href={b.url} target="_blank" rel="noreferrer">{b.url}</a>
+                  <Button className="bg-zinc-900 text-xs" onClick={() => setBookmarks(bookmarks.filter((x) => x.id !== b.id))}>Remove</Button>
+                </li>
+              ))}
+              {!bookmarks.length && <li className="text-zinc-500">No bookmarks yet.</li>}
+            </ul>
+          </Card>
+          <Card>
+            <div className="text-sm text-zinc-400">Quick Notes</div>
+            <div className="flex gap-2 mt-2">
+              <Button className="bg-zinc-800 text-zinc-200" onClick={addNote}><Sparkles className="h-4 w-4 mr-1"/>Add</Button>
+            </div>
+            <ul className="mt-2 space-y-1 text-sm">
+              {notes.map((n) => (
+                <li key={n.id} className="flex items-center justify-between gap-2">
+                  <span className="text-zinc-300 truncate">{n.text}</span>
+                  <Button className="bg-zinc-900 text-xs" onClick={() => setNotes(notes.filter((x) => x.id !== n.id))}>Delete</Button>
+                </li>
+              ))}
+              {!notes.length && <li className="text-zinc-500">No notes yet.</li>}
+            </ul>
+          </Card>
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle icon={Trophy} title="Contests & Leaderboard" subtitle="Track your practice and compete with friends." />
+        <div className="mt-3 text-sm text-zinc-400">Weekly Targets</div>
+        <ul className="mt-2 space-y-1 text-sm text-zinc-300 list-disc pl-5">
+          <li>Solve 10 DSA questions</li>
+          <li>2 Aptitude tests (30 Q each)</li>
+          <li>1 Mock interview</li>
+        </ul>
+        <div className="mt-4 text-sm text-zinc-400">Leaderboard (local demo)</div>
+        <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
+          {["You", "Alex", "Kiran"].map((n, i) => (
+            <div key={n} className="rounded-lg bg-black/40 p-2 border border-white/10 flex items-center gap-2">
+              <span className="text-zinc-300">{i + 1}.</span>
+              <span className="text-zinc-100 font-medium">{n}</span>
+              <span className="ml-auto text-zinc-400">{(100 - i * 15)} pts</span>
+            </div>
+          ))}
+        </div>
+        <Card className="mt-4">
+          <div className="text-sm text-zinc-400">Announcements</div>
+          <ul className="mt-2 text-sm text-zinc-300 space-y-1">
+            <li>📣 New: Resume analyzer heuristics improved</li>
+            <li>🏆 Weekend DSA sprint opens Friday 6 PM</li>
+            <li>🛠️ Coming soon: SQL practice sandbox</li>
+          </ul>
+        </Card>
+      </Card>
+    </div>
+  );
+}
+
+export default function SmartPlacementPortal() {
+  const [dark, setDark] = useDark(true);
+  const [search, setSearch] = useState("");
+
+  const sections = [
+    { id: "aptitude", title: "Aptitude", icon: BarChart2 },
+    { id: "coding", title: "Coding", icon: Code },
+    { id: "hr", title: "HR", icon: Briefcase },
+    { id: "resume", title: "Resume", icon: FileText },
+    { id: "extras", title: "Extras", icon: Calendar },
+  ];
+
+  useEffect(() => {
+    document.title = "Smart Placement Prep Portal";
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-black text-zinc-100">
+      {/* Navbar */}
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-black/70 backdrop-blur">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-6 w-6 text-indigo-400" />
+            <span className="font-semibold">Smart Placement</span>
+          </div>
+          <div className="ml-4 hidden md:flex items-center gap-2 bg-zinc-900 border border-white/10 rounded-xl px-3 py-2 w-full max-w-lg">
+            <Search className="h-4 w-4 text-zinc-500" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="bg-transparent outline-none text-sm w-full"
+              placeholder="Search topics: arrays, graphs, profit & loss, HR tips..."
+            />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <Badge className="hidden md:inline-flex"><Sparkles className="h-4 w-4"/> Black Theme</Badge>
+            <Button
+              className="bg-zinc-900 text-zinc-200 border border-white/10"
+              onClick={() => setDark(!dark)}
+              aria-label="Toggle theme"
+            >
+              {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Hero */}
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/10 via-fuchsia-500/5 to-emerald-500/10 blur-3xl" />
+        <div className="relative max-w-7xl mx-auto px-4 py-12 md:py-16">
+          <div className="grid md:grid-cols-2 gap-8 items-center">
+            <div>
+              <motion.h1
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="text-3xl md:text-5xl font-bold"
+              >
+                Crack Placements with an <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-emerald-400">All‑in‑One</span> Portal
+              </motion.h1>
+              <p className="mt-3 text-zinc-300 max-w-xl">
+                Practice aptitude, sharpen DSA, prep for HR, and strengthen your resume — all in a sleek black theme.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <a href="#coding"><Button className="bg-indigo-600 text-white"><Code className="h-4 w-4 mr-2"/>Start Coding</Button></a>
+                <a href="#resume"><Button className="bg-zinc-900 text-zinc-200 border border-white/10"><FileText className="h-4 w-4 mr-2"/>Analyze Resume</Button></a>
+              </div>
+              <div className="mt-6 flex flex-wrap gap-2">
+                <Badge><PlayCircle className="h-4 w-4"/> In-browser tests</Badge>
+                <Badge><Timer className="h-4 w-4"/> Timed quizzes</Badge>
+                <Badge><Brain className="h-4 w-4"/> ATS heuristics</Badge>
+              </div>
+            </div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.6, delay: 0.1 }}
+              className="rounded-2xl bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-500/20 via-fuchsia-500/10 to-emerald-500/20 p-1"
+            >
+              <div className="rounded-2xl bg-black p-6 border border-white/10">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {sections.map((s) => (
+                    <a key={s.id} href={`#${s.id}`} className="group">
+                      <div className="rounded-xl border border-white/10 bg-zinc-900/60 p-4 h-full transition group-hover:border-indigo-500/60">
+                        <s.icon className="h-6 w-6 text-zinc-400" />
+                        <div className="mt-2 font-medium text-zinc-100">{s.title}</div>
+                        <div className="text-xs text-zinc-400">Explore</div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        </div>
+      </section>
+
+      {/* Feature highlights */}
+      <section className="max-w-7xl mx-auto px-4 py-8">
+        <div className="grid md:grid-cols-4 gap-4">
+          {[{
+            title: "Aptitude",
+            desc: "Timed MCQs with explanations",
+            icon: BarChart2
+          },{
+            title: "Coding",
+            desc: "Auto‑tested JS challenges",
+            icon: Code
+          },{
+            title: "HR",
+            desc: "STAR-based prep tools",
+            icon: Briefcase
+          },{
+            title: "Resume",
+            desc: "ATS heuristics & tips",
+            icon: FileText
+          }].map((f) => (
+            <Card key={f.title}>
+              <div className="flex items-center gap-3">
+                <f.icon className="h-6 w-6 text-zinc-300" />
+                <div>
+                  <div className="font-medium text-white">{f.title}</div>
+                  <div className="text-xs text-zinc-400">{f.desc}</div>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      {/* Modules */}
+      <main className="max-w-7xl mx-auto px-4 pb-16 space-y-8">
+        <section id="aptitude"><AptitudeModule /></section>
+        <section id="coding"><CodingModule /></section>
+        <section id="hr"><HRModule /></section>
+        <section id="resume"><ResumeModule /></section>
+        <section id="extras"><ExtraFeatures /></section>
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-white/10 bg-black/80">
+        <div className="max-w-7xl mx-auto px-4 py-8 text-sm text-zinc-400 flex flex-wrap items-center gap-3 justify-between">
+          <div>© {new Date().getFullYear()} Smart Placement Prep Portal</div>
+          <div className="flex gap-3">
+            <a className="hover:text-zinc-200" href="#aptitude">Aptitude</a>
+            <a className="hover:text-zinc-200" href="#coding">Coding</a>
+            <a className="hover:text-zinc-200" href="#hr">HR</a>
+            <a className="hover:text-zinc-200" href="#resume">Resume</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
